@@ -1,0 +1,35 @@
+#include <iostream>
+#include <fstream>
+#include "Config.h"
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavdevice/avdevice.h>
+}
+
+using std::cout;
+using std::endl;
+using std::ifstream;
+
+int main(int argc, char* argv[]) {
+    AVFormatContext *pFormatCtx;
+
+    cout << "FFMPEG Sandbox Version " << FFMPEGSandbox_VERSION_MAJOR << "." << FFMPEGSandbox_VERSION_MINOR << endl;
+    cout << "Hello World!" << endl;
+
+#if CONFIG_AVDEVICE
+    avdevice_register_all();
+#endif
+    avformat_network_init();
+
+    ifstream inFile;
+    inFile.open("/home/dmancini/Streams/t11.ts");
+
+    avformat_open_input(&pFormatCtx, "/home/dmancini/Streams/t11.ts", nullptr, nullptr);
+
+    const AVStream* streams = *(pFormatCtx->streams);
+
+    cout << streams->codec->bit_rate << endl;
+
+    return EXIT_SUCCESS;
+}

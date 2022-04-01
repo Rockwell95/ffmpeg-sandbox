@@ -1,0 +1,3 @@
+// the configured options and settings for Tutorial
+#define FFMPEGSandbox_VERSION_MAJOR @FFMPEGSandbox_VERSION_MAJOR@
+#define FFMPEGSandbox_VERSION_MINOR @FFMPEGSandbox_VERSION_MINOR@
