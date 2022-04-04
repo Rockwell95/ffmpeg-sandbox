@@ -64,6 +64,7 @@ else
   # udp://239.255.0.1:9093?reuse=1\&fifo_size=5000000\&overrun_nonfatal=1
   # ffmpeg -i ${SOURCE} -y -acodec copy -use_wallclock_as_timestamps true -profile:v main -level 3.0 -start_number 0 -hls_time 5000ms -hls_list_size 0 -r 30 -g 150 -aspect 16/9 -f hls /home/dmancini/Downloads/Unaccelerated/Unaccelerated.m3u8
   ffmpeg \
+    -use_wallclock_as_timestamps 1 \
     -i ${SOURCE} \
     -y \
     -noautoscale \

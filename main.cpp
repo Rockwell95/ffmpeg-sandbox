@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < 2; i++) {
     buffer[i] = new char[256]();
   }
-  av_dict_get_string(programs->metadata, buffer, '=', ';');
+  av_dict_get_string(streams->metadata, buffer, '=', ';');
 
   cout << *buffer << endl;
 
