@@ -2,9 +2,9 @@
 #include <array>
 #include <cstring>
 #include <execinfo.h>
-#include <fstream>
 #include <iostream>
-#include <signal.h>
+#include <csignal>
+#include <unistd.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
