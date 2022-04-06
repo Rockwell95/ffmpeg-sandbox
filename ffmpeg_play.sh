@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
 ACCEL=false
-while getopts ":as:" opt; do
+AUDIO_ONLY=false
+while getopts ":ans:" opt; do
   case $opt in
     a) ACCEL=true
+    ;;
+    n) AUDIO_ONLY=true
     ;;
     s) SOURCE="$OPTARG"
     ;;
@@ -16,12 +19,26 @@ while getopts ":as:" opt; do
   esac
 done
 
-if $ACCEL
+if $AUDIO_ONLY
+then
+  ffmpeg \
+  -f s16le \
+  -sample_rate 44100 \
+  -use_wallclock_as_timestamps true \
+  -i ${SOURCE} \
+  -af aresample=async=1 \
+  -acodec libmp3lame \
+  -start_number 0 \
+  -hls_time 5000ms \
+  -hls_list_size 0 \
+  -f hls /home/dmancini/Downloads/Audio/Audio.m3u8
+elif $ACCEL
 then
   # -filter:v format=nv12\|vaapi,hwupload,scale_vaapi=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=black \
   echo "Using hardware acceleration..."
   ffmpeg \
   -use_wallclock_as_timestamps 1 \
+  -f mpegts \
   -vaapi_device /dev/dri/renderD128 \
   -i ${SOURCE} \
   -y \
