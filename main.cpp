@@ -1,9 +1,9 @@
 #include "Config.h"
 #include <array>
+#include <csignal>
 #include <cstring>
 #include <execinfo.h>
 #include <iostream>
-#include <csignal>
 #include <unistd.h>
 
 extern "C" {
@@ -30,7 +30,7 @@ void handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-  AVFormatContext *pFormatCtx = nullptr;
+  AVFormatContext *pFormatCtx = avformat_alloc_context();
 
   signal(SIGBUS, handler);
 
@@ -44,22 +44,25 @@ int main(int argc, char *argv[]) {
 
   avformat_open_input(&pFormatCtx, argv[1], nullptr, nullptr);
 
-  const AVStream *streams = *(pFormatCtx->streams);
-  const AVProgram *programs = *(pFormatCtx->programs);
-  char **buffer = new char *[2]();
-  for (int i = 0; i < 2; i++) {
-    buffer[i] = new char[256]();
-  }
-  av_dict_get_string(streams->metadata, buffer, '=', ';');
+  cout << "Format: " << pFormatCtx->iformat->long_name << ", duration: " << pFormatCtx->duration << "μs" << endl;
 
-  cout << *buffer << endl;
+  avformat_find_stream_info(pFormatCtx, nullptr);
 
-  for (int i = 0; i < 2; i++) {
-    delete buffer[i];
-    buffer[i] = nullptr;
+  for (size_t i = 0; i < pFormatCtx->nb_streams; i++) {
+    AVCodecParameters *pLocalCodecParameters = pFormatCtx->streams[i]->codecpar;
+    AVCodec *pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
+
+    // specific for video and audio
+    if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
+      cout << "Video Codec: resolution " << pLocalCodecParameters->width << " x " << pLocalCodecParameters->height << endl;
+    } else if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_AUDIO) {
+      cout << "Audio Codec: " << pLocalCodecParameters->channels << " channels, sample rate " <<  pLocalCodecParameters->sample_rate << endl;
+    }
+    // general
+    printf("\tCodec %s ID %d bit_rate %lld", pLocalCodec->long_name, pLocalCodec->id, pLocalCodecParameters->bit_rate);
   }
-  delete[] buffer;
-  buffer = nullptr;
+
+  avformat_free_context(pFormatCtx);
 
   return EXIT_SUCCESS;
 }
