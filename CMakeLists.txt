@@ -24,7 +24,7 @@ pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
 )
 
 # add the executable
-add_executable(${PROJECT_NAME} main.cpp)
+add_executable(${PROJECT_NAME} main.cpp KGCodec.cpp KGCodec.h)
 add_executable(udp_redirect udp_redirect.c)
 
 configure_file(Config.h.in Config.h)
