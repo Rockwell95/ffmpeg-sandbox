@@ -25,7 +25,7 @@ using std::ifstream;
 
 std::condition_variable cv;
 std::mutex cv_m;
-std::atomic<std::chrono::system_clock::time_point> currentFrameTime{std::chrono::system_clock::now()};
+std::atomic currentFrameTime{std::chrono::system_clock::now()};
 
 void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams);
 void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList);
@@ -90,8 +90,8 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
   int streamIndex = 0;
   for (size_t i = 0; i < pInFormatCtx->nb_streams; i++) {
     AVStream *outStream;
-    AVStream *inStream = pInFormatCtx->streams[i];
-    AVCodecParameters *inCodecPar = inStream->codecpar;
+    const AVStream *inStream = pInFormatCtx->streams[i];
+    const AVCodecParameters *inCodecPar = inStream->codecpar;
     if (inCodecPar->codec_type != AVMEDIA_TYPE_VIDEO && inCodecPar->codec_type != AVMEDIA_TYPE_DATA) {
       streamsList[i] = -1;
       continue;
@@ -118,8 +118,7 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
       exit(AVERROR_UNKNOWN);
     }
   }
-  const int headerWriteStatus = avformat_write_header(pOutFormatCtx, nullptr);
-  if (headerWriteStatus < 0) {
+  if (const int headerWriteStatus = avformat_write_header(pOutFormatCtx, nullptr); headerWriteStatus < 0) {
     cerr << "Error occurred when opening output file" << endl;
     exit(1);
   }
@@ -138,8 +137,8 @@ void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
   cout << "Packet Reader Joined" << endl;
   AVPacket packet;
   while (true) {
-    AVStream *inStream;
-    AVStream *outStream;
+    const AVStream *inStream;
+    const AVStream *outStream;
     int readFrameResult;
 
     // This call blocks when the stream stops. 
@@ -169,8 +168,7 @@ void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
 
     // cout << "PTS: " << packet.pts << "; DTS: " << packet.dts << "; FLAGS: " << packet.flags << endl;
 
-    const int writeFrameStatus = av_interleaved_write_frame(pOutFormatCtx, &packet);
-    if (writeFrameStatus < 0) {
+    if (const int writeFrameStatus = av_interleaved_write_frame(pOutFormatCtx, &packet); writeFrameStatus < 0) {
       cerr << "Error Muxing Packet" << endl;
     }
 
