@@ -1,25 +1,35 @@
 #include "Config.h"
 #include "KGCodec.h"
 #include <array>
+#include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <cstring>
 #include <execinfo.h>
 #include <fstream>
 #include <iostream>
+#include <thread>
 #include <unistd.h>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
+#include <libavformat/avio.h>
 }
 
+using std::cerr;
 using std::cout;
 using std::endl;
 using std::ifstream;
 
-void readFrames(AVFormatContext *pContext, AVPacket *pPacket, AVCodecContext *codecContext, AVFrame *pFrame);
-static void saveGrayFrame(const unsigned char *buf, int wrap, int xsize, int ysize, const std::string &filename);
+std::condition_variable cv;
+std::mutex cv_m;
+std::atomic<std::chrono::system_clock::time_point> currentFrameTime{std::chrono::system_clock::now()};
+
+void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams);
+void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList);
+void timeout();
 
 void handler(int sig) {
   void *array[10];
@@ -35,7 +45,8 @@ void handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-  AVFormatContext *pFormatCtx = avformat_alloc_context();
+  AVFormatContext *inputFormatContext = avformat_alloc_context();
+  AVFormatContext *outputFormatContext = nullptr;
 
   signal(SIGBUS, handler);
 
@@ -47,100 +58,139 @@ int main(int argc, char *argv[]) {
   avformat_network_init();
   cout << argv[1] << endl;
 
-  avformat_open_input(&pFormatCtx, argv[1], nullptr, nullptr);
+  avformat_open_input(&inputFormatContext, argv[1], nullptr, nullptr);
 
-  cout << "Format: " << pFormatCtx->iformat->long_name << ", duration: " << pFormatCtx->duration << "μs" << endl;
+  cout << "Format: " << inputFormatContext->iformat->long_name << ", duration: " << inputFormatContext->duration << "μs" << endl;
 
-  avformat_find_stream_info(pFormatCtx, nullptr);
+  avformat_find_stream_info(inputFormatContext, nullptr);
 
-  for (size_t i = 0; i < pFormatCtx->nb_streams; i++) {
-    const AVCodecParameters *pLocalCodecParameters = pFormatCtx->streams[i]->codecpar;
-    const AVCodec *pLocalCodec = avcodec_find_decoder(pLocalCodecParameters->codec_id);
-
-    // specific for video and audio
-    if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_VIDEO) {
-      cout << "Video Codec: resolution " << pLocalCodecParameters->width << " x " << pLocalCodecParameters->height
-           << endl;
-    } else if (pLocalCodecParameters->codec_type == AVMEDIA_TYPE_AUDIO) {
-      cout << "Audio Codec: " << pLocalCodecParameters->channels << " channels, sample rate "
-           << pLocalCodecParameters->sample_rate << endl;
-    }
-    // general
-    if (pLocalCodec != nullptr) {
-      cout << "\tCodec " << pLocalCodec->long_name << " ID " << pLocalCodec->id << " bit_rate "
-           << pLocalCodecParameters->bit_rate << endl;
-
-      // -- -- --
-      AVCodecContext *pCodecContext = avcodec_alloc_context3(pLocalCodec);
-      avcodec_parameters_to_context(pCodecContext, pLocalCodecParameters);
-      avcodec_open2(pCodecContext, pLocalCodec, nullptr);
-
-      AVPacket *pPacket = av_packet_alloc();
-      AVFrame *pFrame = av_frame_alloc();
-
-      readFrames(pFormatCtx, pPacket, pCodecContext, pFrame);
-
-      avcodec_free_context(&pCodecContext);
-      av_packet_free(&pPacket);
-      av_frame_free(&pFrame);
-      // -- -- --
-    } else {
-      const AVCodecID pLocalCodecId = pLocalCodecParameters->codec_id;
-
-      cout << "\tCodec \"" << pLocalCodecId << "\" has no known decoders" << endl;
-    }
+  avformat_alloc_output_context2(&outputFormatContext, nullptr, nullptr, "out.ts");
+  if (!outputFormatContext) {
+    cerr << "Could not create output context!" << endl;
+    return AVERROR_UNKNOWN;
   }
 
-  avformat_free_context(pFormatCtx);
+  int numStreams = inputFormatContext->nb_streams;
+  int *streamsList = nullptr;
+  streamsList = static_cast<int *>(av_mallocz_array(numStreams, sizeof(*streamsList)));
+
+  readFrames(inputFormatContext, outputFormatContext, streamsList, numStreams);
+
+  avformat_close_input(&inputFormatContext);
+
+  if (outputFormatContext && !(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
+    avio_closep(&outputFormatContext->pb);
+  }
+  avformat_free_context(outputFormatContext);
+  av_freep(&streamsList);
 
   return EXIT_SUCCESS;
 }
-void readFrames(AVFormatContext *pContext, AVPacket *pPacket, AVCodecContext *pCodecContext, AVFrame *pFrame) {
-  int wroteFrame = 0;
-  int frameIdx = 0;
-  while (av_read_frame(pContext, pPacket) >= 0) {
-    avcodec_send_packet(pCodecContext, pPacket);
-    avcodec_receive_frame(pCodecContext, pFrame);
-    if (pFrame->pict_type != AV_PICTURE_TYPE_NONE) {
-      cout
-          << "Frame " << av_get_picture_type_char(pFrame->pict_type) << " (" << pCodecContext->frame_number << ") pts "
-          << pFrame->pts << " dts " << pFrame->pkt_dts << " key_frame " << pFrame->key_frame << " [coded_picture_number "
-          << pFrame->coded_picture_number << ", display_picture_number " << pFrame->display_picture_number << "]" << endl;
-
-      if (wroteFrame < 5 && pFrame->data[0] != nullptr) {
-        std::string name = "pgm/out_" + std::to_string(frameIdx) + ".pgm";
-        saveGrayFrame(pFrame->data[0], pFrame->linesize[0], pFrame->width, pFrame->height, name.c_str());
-        wroteFrame++;
-      }
-      frameIdx++;
+void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams) {
+  int streamIndex = 0;
+  for (size_t i = 0; i < pInFormatCtx->nb_streams; i++) {
+    AVStream *outStream;
+    AVStream *inStream = pInFormatCtx->streams[i];
+    AVCodecParameters *inCodecPar = inStream->codecpar;
+    if (inCodecPar->codec_type != AVMEDIA_TYPE_VIDEO && inCodecPar->codec_type != AVMEDIA_TYPE_DATA) {
+      streamsList[i] = -1;
+      continue;
     }
+
+    streamsList[i] = streamIndex++;
+    outStream = avformat_new_stream(pOutFormatCtx, nullptr);
+
+    if (!outStream) {
+      cerr << "Failed " << endl;
+      exit(AVERROR_UNKNOWN);
+    }
+    const int codecCopyStatus = avcodec_parameters_copy(outStream->codecpar, inCodecPar);
+    if (codecCopyStatus < 0) {
+      cerr << "Failed to copy codec params" << endl;
+      exit(AVERROR_UNKNOWN);
+    }
+  }
+
+  if (!(pOutFormatCtx->oformat->flags & AVFMT_NOFILE)) {
+    const int avioOpen = avio_open(&pOutFormatCtx->pb, "out.ts", AVIO_FLAG_WRITE);
+    if (avioOpen < 0) {
+      cerr << "Could not open output file out.ts" << endl;
+      exit(AVERROR_UNKNOWN);
+    }
+  }
+  const int headerWriteStatus = avformat_write_header(pOutFormatCtx, nullptr);
+  if (headerWriteStatus < 0) {
+    cerr << "Error occurred when opening output file" << endl;
+    exit(1);
+  }
+
+  std::jthread tRead(tReadFrame, pInFormatCtx, pOutFormatCtx, numStreams, streamsList);
+  std::jthread tTimeout(timeout);
+  tRead.join();
+  tTimeout.join();
+
+  cout << "Joined Thread" << endl;
+
+  av_write_trailer(pOutFormatCtx);
+}
+
+void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList) {
+  cout << "Packet Reader Joined" << endl;
+  AVPacket packet;
+  while (true) {
+    AVStream *inStream;
+    AVStream *outStream;
+    int readFrameResult;
+
+    // This call blocks when the stream stops. 
+    // TODO: Have the secondary thread push something else through until the stream resumes.
+    readFrameResult = av_read_frame(pInFormatCtx, &packet);
+    currentFrameTime = std::chrono::system_clock::now();
+    if (readFrameResult < 0) {
+      break;
+    }
+
+    // This section updates the packet and writes it.
+    // TODO: Use this logic to fill in gaps in the video stream
+    inStream = pInFormatCtx->streams[packet.stream_index];
+    if (packet.stream_index >= numStreams || streamsList[packet.stream_index] < 0) {
+      av_packet_unref(&packet);
+      continue;
+    }
+    packet.stream_index = streamsList[packet.stream_index];
+    outStream = pOutFormatCtx->streams[packet.stream_index];
+
+    auto options = static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
+    packet.pts = av_rescale_q_rnd(packet.pts, inStream->time_base, outStream->time_base, options);
+    packet.dts = av_rescale_q_rnd(packet.dts, inStream->time_base, outStream->time_base, options);
+    packet.duration = av_rescale_q(packet.duration, inStream->time_base, outStream->time_base);
+
+    packet.pos = -1;
+
+    // cout << "PTS: " << packet.pts << "; DTS: " << packet.dts << "; FLAGS: " << packet.flags << endl;
+
+    const int writeFrameStatus = av_interleaved_write_frame(pOutFormatCtx, &packet);
+    if (writeFrameStatus < 0) {
+      cerr << "Error Muxing Packet" << endl;
+    }
+
+    av_packet_unref(&packet);
   }
 }
 
-static void saveGrayFrame(const unsigned char *buf, int wrap, int xsize, int ysize, const std::string &filename) {
-  //  std::ofstream f;
-  //  f.open(filename, std::ios::app | std::ios::binary);
-  //  // writing the minimal required header for a pgm file format
-  //  // portable graymap format -> https://en.wikipedia.org/wiki/Netpbm_format#PGM_example
-  //  f << "P5\n"
-  //    << xsize << " " << ysize << "\n"
-  //    << 255 << "\n";
-  //
-  //  // writing line by line
-  //  for (size_t i = 0; i < ysize; i++) {
-  //    f.write(reinterpret_cast<char*>(&buf), wrap);
-  //  }
-  //  f.close();
-
-  FILE *f;
-  f = fopen(filename.c_str(), "w");
-  // writing the minimal required header for a pgm file format
-  // portable graymap format -> https://en.wikipedia.org/wiki/Netpbm_format#PGM_example
-  fprintf(f, "P5\n%d %d\n%d\n", xsize, ysize, 255);
-
-  // writing line by line
-  for (size_t i = 0; i < ysize; i++) {
-    fwrite(buf + i * wrap, 1, xsize, f);
+void timeout() {
+  cout << "Timeout thread joined!" << endl;
+  const auto maxDelay = std::chrono::milliseconds(100);
+  while (true) {
+    // Try to save the CPU a little by slowing down to running every 5ms
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const auto now = std::chrono::system_clock::now();
+    const auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(now - currentFrameTime.load());
+    if (diff > maxDelay) {
+      cout << "Too much time has passed!" << endl;
+      // TODO: Start pushing through filler packets until the stream resumes.
+    } else {
+      // TODO: Stop pushing filler data through if doing so.
+    }
   }
-  fclose(f);
 }

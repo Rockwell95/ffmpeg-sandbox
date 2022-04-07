@@ -2,11 +2,14 @@
 
 ACCEL=false
 AUDIO_ONLY=false
-while getopts ":ans:" opt; do
+KLV=false
+while getopts ":akns:" opt; do
   case $opt in
     a) ACCEL=true
     ;;
     n) AUDIO_ONLY=true
+    ;;
+    k) KLV=true
     ;;
     s) SOURCE="$OPTARG"
     ;;
@@ -32,13 +35,22 @@ then
   -hls_time 5000ms \
   -hls_list_size 0 \
   -f hls /home/dmancini/Downloads/Audio/Audio.m3u8
+elif $KLV
+then
+  echo "Dumping KLV"
+  ffmpeg \
+  -use_wallclock_as_timestamps 1 \
+  -i ${SOURCE} \
+  -noautoscale \
+  -use_wallclock_as_timestamps true \
+  -map 0:1 \
+  -f data /home/dmancini/Downloads/klv.bin
 elif $ACCEL
 then
   # -filter:v format=nv12\|vaapi,hwupload,scale_vaapi=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=black \
   echo "Using hardware acceleration..."
   ffmpeg \
   -use_wallclock_as_timestamps 1 \
-  -f mpegts \
   -vaapi_device /dev/dri/renderD128 \
   -i ${SOURCE} \
   -y \
@@ -81,6 +93,7 @@ else
   # udp://239.255.0.1:9093?reuse=1\&fifo_size=5000000\&overrun_nonfatal=1
   # ffmpeg -i ${SOURCE} -y -acodec copy -use_wallclock_as_timestamps true -profile:v main -level 3.0 -start_number 0 -hls_time 5000ms -hls_list_size 0 -r 30 -g 150 -aspect 16/9 -f hls /home/dmancini/Downloads/Unaccelerated/Unaccelerated.m3u8
   ffmpeg \
+    -loglevel trace \
     -use_wallclock_as_timestamps 1 \
     -i ${SOURCE} \
     -y \
@@ -95,9 +108,9 @@ else
     -r 30 \
     -g 150 \
     -filter:v scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=black \
-    -f hls /home/dmancini/Downloads/Unaccelerated/Unaccelerated.m3u8
+    -f hls /home/dmancini/Downloads/Unaccelerated/Unaccelerated.m3u8 2>&1 | tee ffmpeg.log
 fi
  
 # NOTES:
-# Play a still image on a loop example: ffmpeg -re -loop 1 -i 1200px-RCA_Indian_Head_Test_Pattern.svg.png -r 10 -vcodec h264 -f mpegts udp://localhost:9
-# Input for still image: "udp://localhost:9?reuse=1&fifo_size=5000000&overrun_nonfatal=1"
+# Play a still image on a loop example: ffmpeg -re -loop 1 -i 1200px-RCA_Indian_Head_Test_Pattern.svg.png -r 10 -vcodec h264 -f mpegts udp://localhost:9003
+# Input for still image: "udp://localhost:9003?reuse=1&fifo_size=5000000&overrun_nonfatal=1"

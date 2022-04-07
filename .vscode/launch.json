@@ -9,9 +9,24 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/FFMPEGSandbox",
+            "stopAtEntry": false,
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description":  "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ],
             "environment": [{"name": "config", "value": "Debug"}],
-            "cwd": "${workspaceFolder}",
-            "args": ["/home/dmancini/Streams/t11.ts"]
-          }
+            "cwd": "${workspaceFolder}/build",
+            "args": ["udp://localhost:9002?reuse=1\\&fifo_size=5000000\\&overrun_nonfatal=1"]
+        },
     ]
 }
