@@ -12,40 +12,28 @@
  */
 
 #include "Config.h"
-#include "KGCodec.h"
-#include <array>
 #include <chrono>
-#include <condition_variable>
 #include <csignal>
-#include <cstring>
 #include <execinfo.h>
-#include <fstream>
 #include <iostream>
 #include <thread>
-#include <unistd.h>
 
 extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
-#include <libavformat/avio.h>
-#include <libavutil/imgutils.h>
 }
 
 using std::atomic;
 using std::cerr;
 using std::cout;
 using std::endl;
-using std::ifstream;
 
-std::condition_variable cv;
 std::mutex mutex;
-std::atomic currentFrameTime{std::chrono::system_clock::now()};
 static AVPacket packet;
 static AVPacket fallbackPacket;
 static AVFormatContext *inputFormatContext = avformat_alloc_context();
 static AVFormatContext *fallbackFormatContext = avformat_alloc_context();
 static AVFormatContext *outputFormatContext = nullptr;
+static atomic currentFrameTime{std::chrono::system_clock::now()};
 static atomic<long> lastDts{0};
 static atomic<long> lastPts{0};
 static atomic<long> lastDuration{0};
