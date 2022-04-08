@@ -16,21 +16,32 @@ extern "C" {
 #include <libavdevice/avdevice.h>
 #include <libavformat/avformat.h>
 #include <libavformat/avio.h>
+#include <libavutil/imgutils.h>
 }
 
+using std::atomic;
 using std::cerr;
 using std::cout;
 using std::endl;
 using std::ifstream;
 
 std::condition_variable cv;
-std::mutex cv_m;
+std::mutex mutex;
 std::atomic currentFrameTime{std::chrono::system_clock::now()};
-AVPacket packet;
+static AVPacket packet;
+static AVPacket fallbackPacket;
+static AVFormatContext *inputFormatContext = avformat_alloc_context();
+static AVFormatContext *fallbackFormatContext = avformat_alloc_context();
+static AVFormatContext *outputFormatContext = nullptr;
+static atomic<long> lastDts{0};
+static atomic<long> lastPts{0};
+static atomic<long> lastDuration{0};
 
-void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams);
-void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList);
+void readFrames(int *streamsList, int numStreams);
+void tReadFrame(int numStreams, int *streamsList);
 void timeout();
+void writeNewFrame(AVPacket &pkt);
+void writeFillerFrame();
 
 void handler(int sig) {
   void *array[10];
@@ -46,8 +57,6 @@ void handler(int sig) {
 }
 
 int main(int argc, char *argv[]) {
-  AVFormatContext *inputFormatContext = avformat_alloc_context();
-  AVFormatContext *outputFormatContext = nullptr;
 
   signal(SIGBUS, handler);
 
@@ -60,8 +69,10 @@ int main(int argc, char *argv[]) {
   cout << argv[1] << endl;
 
   avformat_open_input(&inputFormatContext, argv[1], nullptr, nullptr);
+  avformat_open_input(&fallbackFormatContext, argv[2], nullptr, nullptr);
 
-  cout << "Format: " << inputFormatContext->iformat->long_name << ", duration: " << inputFormatContext->duration << "μs" << endl;
+  cout << "Input Format: " << inputFormatContext->iformat->long_name << ", duration: " << inputFormatContext->duration << "μs" << endl;
+  cout << "Fallback Format: " << fallbackFormatContext->iformat->long_name << ", duration: " << fallbackFormatContext->duration << "μs" << endl;
 
   avformat_find_stream_info(inputFormatContext, nullptr);
 
@@ -75,9 +86,10 @@ int main(int argc, char *argv[]) {
   int *streamsList = nullptr;
   streamsList = static_cast<int *>(av_calloc(numStreams, sizeof(*streamsList)));
 
-  readFrames(inputFormatContext, outputFormatContext, streamsList, numStreams);
+  readFrames(streamsList, numStreams);
 
   avformat_close_input(&inputFormatContext);
+  avformat_close_input(&fallbackFormatContext);
 
   if (outputFormatContext && !(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
     avio_closep(&outputFormatContext->pb);
@@ -87,11 +99,11 @@ int main(int argc, char *argv[]) {
 
   return EXIT_SUCCESS;
 }
-void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams) {
+void readFrames(int *streamsList, int numStreams) {
   int streamIndex = 0;
-  for (size_t i = 0; i < pInFormatCtx->nb_streams; i++) {
+  for (size_t i = 0; i < inputFormatContext->nb_streams; i++) {
     AVStream *outStream;
-    const AVStream *inStream = pInFormatCtx->streams[i];
+    const AVStream *inStream = inputFormatContext->streams[i];
     const AVCodecParameters *inCodecPar = inStream->codecpar;
     if (inCodecPar->codec_type != AVMEDIA_TYPE_VIDEO && inCodecPar->codec_type != AVMEDIA_TYPE_DATA) {
       streamsList[i] = -1;
@@ -99,7 +111,7 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
     }
 
     streamsList[i] = streamIndex++;
-    outStream = avformat_new_stream(pOutFormatCtx, nullptr);
+    outStream = avformat_new_stream(outputFormatContext, nullptr);
 
     if (!outStream) {
       cerr << "Failed " << endl;
@@ -112,84 +124,111 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
     }
   }
 
-  if (!(pOutFormatCtx->oformat->flags & AVFMT_NOFILE)) {
-    const int avioOpen = avio_open(&pOutFormatCtx->pb, "out.ts", AVIO_FLAG_WRITE);
+  if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
+    // UDP PORT GOES HERE
+    const int avioOpen = avio_open(&outputFormatContext->pb, "udp://localhost:9004", AVIO_FLAG_WRITE);
     if (avioOpen < 0) {
       cerr << "Could not open output file out.ts" << endl;
       exit(AVERROR_UNKNOWN);
     }
   }
-  if (const int headerWriteStatus = avformat_write_header(pOutFormatCtx, nullptr); headerWriteStatus < 0) {
+  if (const int headerWriteStatus = avformat_write_header(outputFormatContext, nullptr); headerWriteStatus < 0) {
     cerr << "Error occurred when opening output file" << endl;
     exit(1);
   }
 
-  std::thread tRead(tReadFrame, pInFormatCtx, pOutFormatCtx, numStreams, streamsList);
-  std::thread tTimeout(timeout);
+  std::jthread tRead(tReadFrame, numStreams, streamsList);
+  std::jthread tTimeout(timeout);
   tRead.join();
   tTimeout.join();
 
   cout << "Joined Thread" << endl;
 
-  av_write_trailer(pOutFormatCtx);
+  av_write_trailer(outputFormatContext);
 }
 
-void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList) {
+void tReadFrame(int numStreams, int *streamsList) {
   cout << "Packet Reader Joined" << endl;
   while (true) {
-    av_packet_unref(&packet);
     const AVStream *inStream;
     const AVStream *outStream;
     int readFrameResult;
 
-    // This call blocks when the stream stops.
-    // TODO: Have the secondary thread push something else through until the stream resumes.
-    readFrameResult = av_read_frame(pInFormatCtx, &packet);
+    readFrameResult = av_read_frame(inputFormatContext, &packet);
     currentFrameTime = std::chrono::system_clock::now();
     if (readFrameResult < 0) {
       break;
     }
 
-    // This section updates the packet and writes it.
-    // TODO: Use this logic to fill in gaps in the video stream
-    inStream = pInFormatCtx->streams[packet.stream_index];
+    inStream = inputFormatContext->streams[packet.stream_index];
     if (packet.stream_index >= numStreams || streamsList[packet.stream_index] < 0) {
       av_packet_unref(&packet);
       continue;
     }
     packet.stream_index = streamsList[packet.stream_index];
-    outStream = pOutFormatCtx->streams[packet.stream_index];
+    outStream = outputFormatContext->streams[packet.stream_index];
 
     auto options = static_cast<AVRounding>(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX);
     packet.pts = av_rescale_q_rnd(packet.pts, inStream->time_base, outStream->time_base, options);
     packet.dts = av_rescale_q_rnd(packet.dts, inStream->time_base, outStream->time_base, options);
     packet.duration = av_rescale_q(packet.duration, inStream->time_base, outStream->time_base);
 
+    lastDts = packet.dts;
+    lastPts = packet.pts;
+    lastDuration = packet.duration;
+
     packet.pos = -1;
 
     // cout << "PTS: " << packet.pts << "; DTS: " << packet.dts << "; FLAGS: " << packet.flags << endl;
 
-    if (const int writeFrameStatus = av_interleaved_write_frame(pOutFormatCtx, &packet); writeFrameStatus < 0) {
-      cerr << "Error Muxing Packet" << endl;
-    }
+    writeNewFrame(packet);
+    av_packet_unref(&packet);
   }
+}
+
+void writeNewFrame(AVPacket &pkt) {
+  std::lock_guard lock(mutex);
+  if (const int writeFrameStatus = av_interleaved_write_frame(outputFormatContext, &pkt); writeFrameStatus < 0) {
+    cerr << "Error Muxing Packet" << endl;
+  }
+}
+
+void writeFillerFrame() {
+  fallbackPacket.pts = lastPts;
+  fallbackPacket.dts = lastDts;
+  fallbackPacket.duration = lastDuration;
+
+  lastDts = fallbackPacket.dts + 3000;
+  lastPts = fallbackPacket.pts + 3000;
+  lastDuration = fallbackPacket.duration;
+
+  packet.pos = -1;
+
+  writeNewFrame(fallbackPacket);
+  av_packet_unref(&fallbackPacket);
 }
 
 void timeout() {
   cout << "Timeout thread joined!" << endl;
   const auto maxDelay = std::chrono::milliseconds(100);
+  long lastFallbackDts = 0;
+  long lastFallbackPts = 0;
   while (true) {
-    // Try to save the CPU a little by slowing down to running every 5ms
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    int readFrameResult;
+    readFrameResult = av_read_frame(fallbackFormatContext, &fallbackPacket);
+    if (readFrameResult < 0) {
+      break;
+    }
+
     const auto now = std::chrono::system_clock::now();
     const auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(now - currentFrameTime.load());
-    if (diff > maxDelay) {
+    if (diff > maxDelay && lastFallbackDts != fallbackPacket.dts && lastFallbackPts != fallbackPacket.pts) {
       cout << "Too much time has passed: " << diff.count() << "ms " << endl;
-      cout << packet.pts << endl;
-      // TODO: Start pushing through filler packets until the stream resumes.
-    } else {
-      // TODO: Stop pushing filler data through if doing so.
-      cout << "shqip: " << packet.pts << endl;
+      cout << "PTS: " << lastPts << "; DTS: " << lastDts << "; DURATION: " << lastDuration << endl;
+      writeFillerFrame();
     }
+    lastFallbackDts = fallbackPacket.dts;
+    lastFallbackPts = fallbackPacket.pts;
   }
 }

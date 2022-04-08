@@ -50,7 +50,6 @@ then
   # -filter:v format=nv12\|vaapi,hwupload,scale_vaapi=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:-1:-1:color=black \
   echo "Using hardware acceleration..."
   ffmpeg \
-  -use_wallclock_as_timestamps 1 \
   -vaapi_device /dev/dri/renderD128 \
   -i ${SOURCE} \
   -y \
@@ -112,5 +111,5 @@ else
 fi
  
 # NOTES:
-# Play a still image on a loop example: ffmpeg -re -loop 1 -i 1200px-RCA_Indian_Head_Test_Pattern.svg.png -r 10 -vcodec h264 -f mpegts udp://localhost:9003
+# Play a still image on a loop example: ffmpeg -vaapi_device /dev/dri/renderD128 -re -loop 1 -i 1200px-RCA_Indian_Head_Test_Pattern.svg.png -r 30 -g 10 -vcodec mpeg2_vaapi -vf "format=nv12|vaapi,scale=1280:720:force_original_aspect_ratio=1,pad=1280:720:(ow-iw)/2:(oh-ih)/2:color=black,hwupload" -f mpegts udp://localhost:9003
 # Input for still image: "udp://localhost:9003?reuse=1&fifo_size=5000000&overrun_nonfatal=1"
