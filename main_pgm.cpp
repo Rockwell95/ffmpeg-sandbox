@@ -1,3 +1,14 @@
+/**
+ * @file main_pgm.cpp
+ * @author Dominick Mancini
+ * @brief Small libavformat implementation that reads a video source, and creates PGM files of the first five frames
+ * @version 0.1
+ * @date 2022-04-08
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #include "Config.h"
 #include "KGCodec.h"
 #include <array>

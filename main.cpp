@@ -1,3 +1,16 @@
+/**
+ * @file main.cpp
+ * @author Dominick Mancini
+ * @brief Small libavformat implementation that reads in two video sources (ideally streams) and outputs a single continuous stream.
+ * When the initial source hasn't received data in a given amount of time (currently hardcoded to 100ms), it falls back to the second
+ * source which should be guaranteed reliable (i.e., running on the same host) and sends it out instead.
+ * @version 0.1
+ * @date 2022-04-08
+ * 
+ * @copyright Copyright (c) 2022
+ * 
+ */
+
 #include "Config.h"
 #include "KGCodec.h"
 #include <array>
