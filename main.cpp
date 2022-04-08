@@ -26,6 +26,7 @@ using std::ifstream;
 std::condition_variable cv;
 std::mutex cv_m;
 std::atomic currentFrameTime{std::chrono::system_clock::now()};
+AVPacket packet;
 
 void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int *streamsList, int numStreams);
 void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList);
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]) {
 
   int numStreams = inputFormatContext->nb_streams;
   int *streamsList = nullptr;
-  streamsList = static_cast<int *>(av_mallocz_array(numStreams, sizeof(*streamsList)));
+  streamsList = static_cast<int *>(av_calloc(numStreams, sizeof(*streamsList)));
 
   readFrames(inputFormatContext, outputFormatContext, streamsList, numStreams);
 
@@ -123,8 +124,8 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
     exit(1);
   }
 
-  std::jthread tRead(tReadFrame, pInFormatCtx, pOutFormatCtx, numStreams, streamsList);
-  std::jthread tTimeout(timeout);
+  std::thread tRead(tReadFrame, pInFormatCtx, pOutFormatCtx, numStreams, streamsList);
+  std::thread tTimeout(timeout);
   tRead.join();
   tTimeout.join();
 
@@ -135,13 +136,13 @@ void readFrames(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
 
 void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, int numStreams, int *streamsList) {
   cout << "Packet Reader Joined" << endl;
-  AVPacket packet;
   while (true) {
+    av_packet_unref(&packet);
     const AVStream *inStream;
     const AVStream *outStream;
     int readFrameResult;
 
-    // This call blocks when the stream stops. 
+    // This call blocks when the stream stops.
     // TODO: Have the secondary thread push something else through until the stream resumes.
     readFrameResult = av_read_frame(pInFormatCtx, &packet);
     currentFrameTime = std::chrono::system_clock::now();
@@ -171,8 +172,6 @@ void tReadFrame(AVFormatContext *pInFormatCtx, AVFormatContext *pOutFormatCtx, i
     if (const int writeFrameStatus = av_interleaved_write_frame(pOutFormatCtx, &packet); writeFrameStatus < 0) {
       cerr << "Error Muxing Packet" << endl;
     }
-
-    av_packet_unref(&packet);
   }
 }
 
@@ -185,10 +184,12 @@ void timeout() {
     const auto now = std::chrono::system_clock::now();
     const auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(now - currentFrameTime.load());
     if (diff > maxDelay) {
-      cout << "Too much time has passed!" << endl;
+      cout << "Too much time has passed: " << diff.count() << "ms " << endl;
+      cout << packet.pts << endl;
       // TODO: Start pushing through filler packets until the stream resumes.
     } else {
       // TODO: Stop pushing filler data through if doing so.
+      cout << "shqip: " << packet.pts << endl;
     }
   }
 }
