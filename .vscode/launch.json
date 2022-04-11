@@ -24,9 +24,9 @@
                     "ignoreFailures": true
                 }
             ],
-            "environment": [{"name": "config", "value": "Debug"}, {"name": "LD_LIBRARY_PATH", "value": "/home/dmancini/boost-lib/lib:$LD_LIBRARY_PATH"}],
+            "environment": [{"name": "config", "value": "Debug"}, {"name": "LD_LIBRARY_PATH", "value": "${workspaceFolder}/build/bin:$LD_LIBRARY_PATH"}],
             "cwd": "${workspaceFolder}/build",
-            "args": ["udp://localhost:9002?reuse=1\\&fifo_size=5000000\\&overrun_nonfatal=1", "udp://localhost:9003?reuse=1\\&fifo_size=5000000\\&overrun_nonfatal=1"]
+            "args": ["udp://localhost:9002?reuse=1\\&fifo_size=5000000\\&overrun_nonfatal=1", "udp://localhost:9003?reuse=1\\&fifo_size=5000000\\&overrun_nonfatal=1", "udp://localhost:9004"]
         },
     ]
 }

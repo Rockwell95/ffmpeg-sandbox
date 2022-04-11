@@ -34,15 +34,15 @@ static atomic<long> lastDts{0};
 static atomic<long> lastPts{0};
 static atomic<long> lastDuration{0};
 
-void readFrames(int *streamsList, int numStreams);
+void readFrames(int *streamsList, int numStreams, const char *outputSource);
 void tReadFrame(int numStreams, int *streamsList);
 void timeout();
 void writeNewFrame(AVPacket &pkt);
 void writeFillerFrame();
 
 int main(int argc, char *argv[]) {
-  if (argc < 3) {
-    std::cout << "usage: ./FFMPEGSandbox <primary source> <fallback source>" << std::endl;
+  if (argc < 4) {
+    std::cout << "usage: ./FFMPEGSandbox <primary source> <fallback source> <output>" << std::endl;
     return EXIT_FAILURE;
   }
 
@@ -54,6 +54,7 @@ int main(int argc, char *argv[]) {
   avformat_network_init();
   const char *primarySource = argv[1];
   const char *fallbackSource = argv[2];
+  const char *outputSource = argv[3];
   BOOST_LOG_TRIVIAL(info) << primarySource;
   BOOST_LOG_TRIVIAL(info) << fallbackSource;
 
@@ -75,7 +76,7 @@ int main(int argc, char *argv[]) {
   int *streamsList = nullptr;
   streamsList = static_cast<int *>(av_calloc(numStreams, sizeof(*streamsList)));
 
-  readFrames(streamsList, numStreams);
+  readFrames(streamsList, numStreams, outputSource);
 
   avformat_close_input(&inputFormatContext);
   avformat_close_input(&fallbackFormatContext);
@@ -88,7 +89,7 @@ int main(int argc, char *argv[]) {
 
   return EXIT_SUCCESS;
 }
-void readFrames(int *streamsList, int numStreams) {
+void readFrames(int *streamsList, int numStreams, const char *outputSource) {
   int streamIndex = 0;
   for (size_t i = 0; i < inputFormatContext->nb_streams; i++) {
     AVStream *outStream;
@@ -115,7 +116,7 @@ void readFrames(int *streamsList, int numStreams) {
 
   if (!(outputFormatContext->oformat->flags & AVFMT_NOFILE)) {
     // UDP PORT GOES HERE
-    const int avioOpen = avio_open(&outputFormatContext->pb, "udp://localhost:9004", AVIO_FLAG_WRITE);
+    const int avioOpen = avio_open(&outputFormatContext->pb, outputSource, AVIO_FLAG_WRITE);
     if (avioOpen < 0) {
       BOOST_LOG_TRIVIAL(error) << "Could not open output file out.ts";
       exit(AVERROR_UNKNOWN);
@@ -199,7 +200,7 @@ void writeFillerFrame() {
 
 void timeout() {
   BOOST_LOG_TRIVIAL(info) << "Timeout thread joined!";
-  const auto maxDelay = std::chrono::milliseconds(100);
+  const auto maxDelay = std::chrono::milliseconds(66);
   long lastFallbackDts = 0;
   long lastFallbackPts = 0;
   while (true) {
