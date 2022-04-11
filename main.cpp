@@ -14,7 +14,6 @@
 #include "Config.h"
 #include <boost/log/trivial.hpp>
 #include <chrono>
-#include <csignal>
 #include <iostream>
 #include <thread>
 
