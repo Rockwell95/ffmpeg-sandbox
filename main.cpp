@@ -16,6 +16,7 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <mutex>
 
 extern "C" {
 #include <libavformat/avformat.h>

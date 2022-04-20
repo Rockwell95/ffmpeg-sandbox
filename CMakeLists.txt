@@ -31,7 +31,7 @@ pkg_check_modules(LIBAV REQUIRED IMPORTED_TARGET
 )
 
 if(MSVC)
-  target_compile_options(${PROJECT_NAME} PRIVATE /W4 /WX)
+  target_compile_options(${PROJECT_NAME} PRIVATE /EHsc /W3 /MD)
 else()
   target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
@@ -44,3 +44,6 @@ target_include_directories(${PROJECT_NAME}
 )
 
 target_link_libraries(${PROJECT_NAME} PkgConfig::LIBAV ${CONAN_LIBS})
+
+install(TARGETS ${PROJECT_NAME} DESTINATION ${PROJECT_BINARY_DIR}/bin)
+install(FILES file(GET_RUNTIME_DEPENDENCIES LIBRARIES) DESTINATION ${PROJECT_BINARY_DIR}/bin)
