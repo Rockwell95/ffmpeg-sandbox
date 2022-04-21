@@ -12,7 +12,7 @@
  */
 
 #include "Config.h"
-#include <boost/log/trivial.hpp>
+#include <easylogging++.h>
 #include <chrono>
 #include <iostream>
 #include <thread>
@@ -41,13 +41,15 @@ void timeout();
 void writeNewFrame(AVPacket &pkt);
 void writeFillerFrame();
 
+INITIALIZE_EASYLOGGINGPP
+
 int main(int argc, char *argv[]) {
   if (argc < 4) {
     std::cout << "usage: ./FFMPEGSandbox <primary source> <fallback source> <output>" << std::endl;
     return EXIT_FAILURE;
   }
 
-  BOOST_LOG_TRIVIAL(info) << "FFMPEG Sandbox Version " << FFMPEGSandbox_VERSION_MAJOR << "." << FFMPEGSandbox_VERSION_MINOR;
+  LOG(INFO) << "FFMPEG Sandbox Version " << FFMPEGSandbox_VERSION_MAJOR << "." << FFMPEGSandbox_VERSION_MINOR;
 
 #if CONFIG_AVDEVICE
   avdevice_register_all();
@@ -56,20 +58,20 @@ int main(int argc, char *argv[]) {
   const char *primarySource = argv[1];
   const char *fallbackSource = argv[2];
   const char *outputSource = argv[3];
-  BOOST_LOG_TRIVIAL(info) << primarySource;
-  BOOST_LOG_TRIVIAL(info) << fallbackSource;
+  LOG(INFO) << primarySource;
+  LOG(INFO) << fallbackSource;
 
   avformat_open_input(&inputFormatContext, primarySource, nullptr, nullptr);
   avformat_open_input(&fallbackFormatContext, fallbackSource, nullptr, nullptr);
 
-  BOOST_LOG_TRIVIAL(info) << "Input Format: " << inputFormatContext->iformat->long_name << ", duration: " << inputFormatContext->duration << "μs";
-  BOOST_LOG_TRIVIAL(info) << "Fallback Format: " << fallbackFormatContext->iformat->long_name << ", duration: " << fallbackFormatContext->duration << "μs";
+  LOG(INFO) << "Input Format: " << inputFormatContext->iformat->long_name << ", duration: " << inputFormatContext->duration << "μs";
+  LOG(INFO) << "Fallback Format: " << fallbackFormatContext->iformat->long_name << ", duration: " << fallbackFormatContext->duration << "μs";
 
   avformat_find_stream_info(inputFormatContext, nullptr);
 
   avformat_alloc_output_context2(&outputFormatContext, nullptr, nullptr, "out.ts");
   if (!outputFormatContext) {
-    BOOST_LOG_TRIVIAL(error) << "Could not create output context!";
+    LOG(ERROR)  << "Could not create output context!";
     return AVERROR_UNKNOWN;
   }
 
@@ -105,12 +107,12 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
     outStream = avformat_new_stream(outputFormatContext, nullptr);
 
     if (!outStream) {
-      BOOST_LOG_TRIVIAL(error) << "Failed ";
+      LOG(ERROR)  << "Failed ";
       exit(AVERROR_UNKNOWN);
     }
     const int codecCopyStatus = avcodec_parameters_copy(outStream->codecpar, inCodecPar);
     if (codecCopyStatus < 0) {
-      BOOST_LOG_TRIVIAL(error) << "Failed to copy codec params";
+      LOG(ERROR)  << "Failed to copy codec params";
       exit(AVERROR_UNKNOWN);
     }
   }
@@ -119,12 +121,12 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
     // UDP PORT GOES HERE
     const int avioOpen = avio_open(&outputFormatContext->pb, outputSource, AVIO_FLAG_WRITE);
     if (avioOpen < 0) {
-      BOOST_LOG_TRIVIAL(error) << "Could not open output file out.ts";
+      LOG(ERROR)  << "Could not open output file out.ts";
       exit(AVERROR_UNKNOWN);
     }
   }
   if (const int headerWriteStatus = avformat_write_header(outputFormatContext, nullptr); headerWriteStatus < 0) {
-    BOOST_LOG_TRIVIAL(error) << "Error occurred when opening output file";
+    LOG(ERROR)  << "Error occurred when opening output file";
     exit(1);
   }
 
@@ -133,13 +135,13 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
   tRead.join();
   tTimeout.join();
 
-  BOOST_LOG_TRIVIAL(info) << "Joined Thread";
+  LOG(INFO) << "Joined Thread";
 
   av_write_trailer(outputFormatContext);
 }
 
 void tReadFrame(int numStreams, int *streamsList) {
-  BOOST_LOG_TRIVIAL(info) << "Packet Reader Joined";
+  LOG(INFO) << "Packet Reader Joined";
   while (true) {
     const AVStream *inStream;
     const AVStream *outStream;
@@ -170,7 +172,7 @@ void tReadFrame(int numStreams, int *streamsList) {
 
     packet.pos = -1;
 
-    // BOOST_LOG_TRIVIAL(info) << "PTS: " << packet.pts << "; DTS: " << packet.dts << "; FLAGS: " << packet.flags;
+    // LOG(INFO) << "PTS: " << packet.pts << "; DTS: " << packet.dts << "; FLAGS: " << packet.flags;
 
     writeNewFrame(packet);
     av_packet_unref(&packet);
@@ -180,7 +182,7 @@ void tReadFrame(int numStreams, int *streamsList) {
 void writeNewFrame(AVPacket &pkt) {
   std::lock_guard lock(mutex);
   if (const int writeFrameStatus = av_interleaved_write_frame(outputFormatContext, &pkt); writeFrameStatus < 0) {
-    BOOST_LOG_TRIVIAL(error) << "Error Muxing Packet";
+    LOG(ERROR)  << "Error Muxing Packet";
   }
 }
 
@@ -200,7 +202,7 @@ void writeFillerFrame() {
 }
 
 void timeout() {
-  BOOST_LOG_TRIVIAL(info) << "Timeout thread joined!";
+  LOG(INFO) << "Timeout thread joined!";
   const auto maxDelay = std::chrono::milliseconds(66);
   long lastFallbackDts = 0;
   long lastFallbackPts = 0;
@@ -215,8 +217,8 @@ void timeout() {
     const auto now = std::chrono::system_clock::now();
     const auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(now - currentFrameTime.load());
     if (diff > maxDelay && lastFallbackDts != fallbackPacket.dts && lastFallbackPts != fallbackPacket.pts) {
-      BOOST_LOG_TRIVIAL(warning) << "Too much time has passed: " << diff.count() << "ms ";
-      BOOST_LOG_TRIVIAL(warning) << "PTS: " << lastPts << "; DTS: " << lastDts << "; DURATION: " << lastDuration;
+      LOG(WARNING) << "Too much time has passed: " << diff.count() << "ms ";
+      LOG(WARNING) << "PTS: " << lastPts << "; DTS: " << lastDts << "; DURATION: " << lastDuration;
       writeFillerFrame();
     }
     lastFallbackDts = fallbackPacket.dts;

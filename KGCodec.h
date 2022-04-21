@@ -7,7 +7,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
-};
+}
 class KGCodec {
   public:
       KGCodec(const AVCodec &codec, const AVCodecParameters &codecParams);

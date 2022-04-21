@@ -1,5 +1,5 @@
 [requires]
-boost/1.78.0
+easyloggingpp/9.97.0
 
 [generators]
 cmake
