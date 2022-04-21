@@ -44,6 +44,11 @@ void writeFillerFrame();
 INITIALIZE_EASYLOGGINGPP
 
 int main(int argc, char *argv[]) {
+
+  el::Configurations defaultConf;
+  defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime{%Y-%M-%d %H:%m%s.%g}] [%level] %msg");
+  el::Loggers::reconfigureLogger("default", defaultConf);
+
   if (argc < 4) {
     std::cout << "usage: ./FFMPEGSandbox <primary source> <fallback source> <output>" << std::endl;
     return EXIT_FAILURE;
