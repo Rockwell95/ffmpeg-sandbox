@@ -46,7 +46,7 @@ INITIALIZE_EASYLOGGINGPP
 int main(int argc, char *argv[]) {
 
   el::Configurations defaultConf;
-  defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime{%Y-%M-%d %H:%m%s.%g}] [%level] %msg");
+  defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime{%Y-%M-%d %H:%m:%s.%g}] [%level] %msg");
   el::Loggers::reconfigureLogger("default", defaultConf);
 
   if (argc < 4) {
