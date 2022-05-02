@@ -1,5 +1,0 @@
-[requires]
-glog/0.6.0
-
-[generators]
-cmake

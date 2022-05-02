@@ -43,7 +43,6 @@ void writeFillerFrame();
 
 int main(int argc, char *argv[]) {
 
-  FLAGS_logtostdout = true;
   FLAGS_alsologtostderr = true;
   google::InitGoogleLogging(argv[0]);
 
