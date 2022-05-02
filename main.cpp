@@ -12,11 +12,11 @@
  */
 
 #include "Config.h"
-#include <easylogging++.h>
 #include <chrono>
+#include <glog/logging.h>
 #include <iostream>
-#include <thread>
 #include <mutex>
+#include <thread>
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -36,18 +36,16 @@ static atomic<long> lastPts{0};
 static atomic<long> lastDuration{0};
 
 void readFrames(int *streamsList, int numStreams, const char *outputSource);
-void tReadFrame(int numStreams, int *streamsList);
+void tReadFrame(int numStreams, const int *streamsList);
 void timeout();
 void writeNewFrame(AVPacket &pkt);
 void writeFillerFrame();
 
-INITIALIZE_EASYLOGGINGPP
-
 int main(int argc, char *argv[]) {
 
-  el::Configurations defaultConf;
-  defaultConf.setGlobally(el::ConfigurationType::Format, "[%datetime{%Y-%M-%d %H:%m:%s.%g}] [%level] %msg");
-  el::Loggers::reconfigureLogger("default", defaultConf);
+  FLAGS_logtostdout = true;
+  FLAGS_alsologtostderr = true;
+  google::InitGoogleLogging(argv[0]);
 
   if (argc < 4) {
     std::cout << "usage: ./FFMPEGSandbox <primary source> <fallback source> <output>" << std::endl;
@@ -74,9 +72,9 @@ int main(int argc, char *argv[]) {
 
   avformat_find_stream_info(inputFormatContext, nullptr);
 
-  avformat_alloc_output_context2(&outputFormatContext, nullptr, nullptr, "out.ts");
+  avformat_alloc_output_context2(&outputFormatContext, nullptr, "mpegts", nullptr);
   if (!outputFormatContext) {
-    LOG(ERROR)  << "Could not create output context!";
+    LOG(ERROR) << "Could not create output context!";
     return AVERROR_UNKNOWN;
   }
 
@@ -112,12 +110,12 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
     outStream = avformat_new_stream(outputFormatContext, nullptr);
 
     if (!outStream) {
-      LOG(ERROR)  << "Failed ";
+      LOG(ERROR) << "Failed ";
       exit(AVERROR_UNKNOWN);
     }
     const int codecCopyStatus = avcodec_parameters_copy(outStream->codecpar, inCodecPar);
     if (codecCopyStatus < 0) {
-      LOG(ERROR)  << "Failed to copy codec params";
+      LOG(ERROR) << "Failed to copy codec params";
       exit(AVERROR_UNKNOWN);
     }
   }
@@ -126,12 +124,12 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
     // UDP PORT GOES HERE
     const int avioOpen = avio_open(&outputFormatContext->pb, outputSource, AVIO_FLAG_WRITE);
     if (avioOpen < 0) {
-      LOG(ERROR)  << "Could not open output file out.ts";
+      LOG(ERROR) << "Could not open output file out.ts";
       exit(AVERROR_UNKNOWN);
     }
   }
   if (const int headerWriteStatus = avformat_write_header(outputFormatContext, nullptr); headerWriteStatus < 0) {
-    LOG(ERROR)  << "Error occurred when opening output file";
+    LOG(ERROR) << "Error occurred when opening output file";
     exit(1);
   }
 
@@ -145,7 +143,7 @@ void readFrames(int *streamsList, int numStreams, const char *outputSource) {
   av_write_trailer(outputFormatContext);
 }
 
-void tReadFrame(int numStreams, int *streamsList) {
+void tReadFrame(int numStreams, const int *streamsList) {
   LOG(INFO) << "Packet Reader Joined";
   while (true) {
     const AVStream *inStream;
@@ -187,7 +185,7 @@ void tReadFrame(int numStreams, int *streamsList) {
 void writeNewFrame(AVPacket &pkt) {
   std::lock_guard lock(mutex);
   if (const int writeFrameStatus = av_interleaved_write_frame(outputFormatContext, &pkt); writeFrameStatus < 0) {
-    LOG(ERROR)  << "Error Muxing Packet";
+    LOG(ERROR) << "Error Muxing Packet";
   }
 }
 
@@ -200,10 +198,9 @@ void writeFillerFrame() {
   lastPts = fallbackPacket.pts + 3000;
   lastDuration = fallbackPacket.duration;
 
-  packet.pos = -1;
+  fallbackPacket.pos = -1;
 
   writeNewFrame(fallbackPacket);
-  av_packet_unref(&fallbackPacket);
 }
 
 void timeout() {
@@ -226,6 +223,7 @@ void timeout() {
       LOG(WARNING) << "PTS: " << lastPts << "; DTS: " << lastDts << "; DURATION: " << lastDuration;
       writeFillerFrame();
     }
+    av_packet_unref(&fallbackPacket);
     lastFallbackDts = fallbackPacket.dts;
     lastFallbackPts = fallbackPacket.pts;
   }
